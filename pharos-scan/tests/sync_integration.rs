@@ -343,6 +343,77 @@ async fn test_should_skip_device_already_owned_by_pulse() {
     }
 }
 
+// Regression test for a real production bug found live against pharos-01.iamrichardd.com:
+// pharos-scan --auto created 8 duplicate records for devices already tracked by pharos-pulse,
+// because hostname resolution failed for those devices during the scan (common on networks
+// without real PTR records) and the resulting alias=device-<mac> identifier was never
+// cross-referenced against mac_addr, the one field populated on both an alias-keyed scan record
+// and a hostname-keyed pulse record for the same physical device.
+#[tokio::test]
+async fn test_should_skip_via_mac_cross_reference_when_hostname_resolution_failed() {
+    let (addr, _storage) = setup_test_server().await;
+
+    let mut pulse_client = PharosClient::connect(&addr, "pulse-test-host").await.unwrap();
+
+    let add_resp = pulse_client
+        .execute_authenticated(
+            "add hostname=\"technitium-02\" type=\"machine\" manufacturer=\"Raspberry Pi\" mac_addr=\"bc:24:11:00:02:04\" ip_addr=\"10.0.0.50\"",
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(add_resp, PharosResponse::Ok(_)),
+        "Pulse add failed: {:?}",
+        add_resp
+    );
+
+    let mut scan_client = PharosClient::connect(&addr, "pharos-scan").await.unwrap();
+
+    // hostname: None simulates a failed reverse-DNS lookup for this device during the scan -
+    // sync_discovered_device falls back to the alias identifier, exactly like the real bug.
+    let scan_node = DiscoveredNode {
+        ip: "10.0.0.50".parse().unwrap(),
+        hostname: None,
+        mac: Some("bc:24:11:00:02:04".to_string()),
+        manufacturer: Some("Some MAC-OUI Guess".to_string()),
+        ports: vec![],
+        role: None,
+        is_existing: false,
+    };
+
+    let outcome = sync_discovered_device(&mut scan_client, &scan_node).await;
+    assert_eq!(outcome, SyncOutcome::Skipped);
+
+    // Confirm no duplicate alias-keyed record was created for this device.
+    let expected_alias = derive_scan_alias("bc:24:11:00:02:04");
+    let resp = scan_client
+        .execute(&format!("query type=\"machine\" alias=\"{}\"", expected_alias))
+        .await
+        .unwrap();
+    if let PharosResponse::Matches { count, records } = resp {
+        assert_eq!(count, 0, "expected no duplicate alias record, got {:?}", records);
+    } else {
+        panic!("Expected PharosResponse::Matches with count 0, got {:?}", resp);
+    }
+
+    // The original pulse-owned record is untouched.
+    let resp2 = scan_client
+        .execute("query type=\"machine\" hostname=\"technitium-02\"")
+        .await
+        .unwrap();
+    if let PharosResponse::Matches { count, records } = resp2 {
+        assert_eq!(count, 1);
+        let mfr = records[0]
+            .fields
+            .iter()
+            .find(|f| f.key == "manufacturer")
+            .map(|f| f.value.as_str());
+        assert_eq!(mfr, Some("Raspberry Pi"), "pulse-owned record's manufacturer must be untouched");
+    } else {
+        panic!("Expected PharosResponse::Matches, got {:?}", resp2);
+    }
+}
+
 #[tokio::test]
 async fn test_should_fail_gracefully_with_no_hostname_or_mac() {
     let (addr, _storage) = setup_test_server().await;

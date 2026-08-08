@@ -73,7 +73,43 @@ pub async fn sync_discovered_device(
         );
     };
 
-    // 2. Query for an existing record first. Must use execute_authenticated, not execute:
+    // 2. When hostname resolution failed (field_name == "alias"), the alias identifier alone
+    // can't detect a device already tracked under a DIFFERENT identifying scheme - e.g. a
+    // pharos-pulse-owned record keyed by hostname, for the same physical device. Cross-reference
+    // by mac_addr first in that case, since it's the one field populated on both an alias-keyed
+    // scan record and a hostname-keyed pulse record for the same device. Not needed when
+    // field_name == "hostname": a resolved hostname is already a direct, unambiguous match
+    // against how every other source identifies a record.
+    if field_name == "alias" {
+        if let Some(ref mac) = node.mac {
+            if !mac.trim().is_empty() {
+                let mac_query = format!("query type=\"machine\" mac_addr=\"{}\"", mac);
+                match client.execute_authenticated(&mac_query).await {
+                    Ok(PharosResponse::Matches { ref records, .. }) => {
+                        if let Some(record) = records.first() {
+                            if record
+                                .fields
+                                .iter()
+                                .any(|f| f.key == "source" && f.value != "pharos-scan")
+                            {
+                                return SyncOutcome::Skipped;
+                            }
+                        }
+                    }
+                    Ok(PharosResponse::Error { ref message, .. }) => {
+                        return SyncOutcome::Failed(message.clone());
+                    }
+                    Ok(PharosResponse::AuthenticationRequired { .. }) => {
+                        return SyncOutcome::Failed("Authentication required for query".to_string());
+                    }
+                    Ok(PharosResponse::Ok(_)) => {}
+                    Err(e) => return SyncOutcome::Failed(e.to_string()),
+                }
+            }
+        }
+    }
+
+    // 3. Query for an existing record first. Must use execute_authenticated, not execute:
     // under SecurityTier::Protected/Scoped, every command except a small allowlist
     // (status/id/login/auth/quit) requires authentication - query is not exempt. Using plain
     // execute() here only worked in testing because that test harness ran SecurityTier::Open,
@@ -86,7 +122,7 @@ pub async fn sync_discovered_device(
         Err(e) => return SyncOutcome::Failed(e.to_string()),
     };
 
-    // 3. Check ownership
+    // 4. Check ownership
     let record_existed = match query_resp {
         PharosResponse::Matches { ref records, .. } => {
             if let Some(record) = records.first() {
@@ -111,7 +147,7 @@ pub async fn sync_discovered_device(
         }
     };
 
-    // 4. Otherwise, write
+    // 5. Otherwise, write
     let mut add_cmd = format!(
         "add type=\"machine\" {}=\"{}\" ip_addr=\"{}\"",
         field_name, identifier, node.ip
@@ -132,7 +168,7 @@ pub async fn sync_discovered_device(
         Err(e) => return SyncOutcome::Failed(e.to_string()),
     };
 
-    // 5. Determine the result
+    // 6. Determine the result
     match write_resp {
         PharosResponse::Ok(_) | PharosResponse::Matches { .. } => {
             if record_existed {

@@ -231,22 +231,55 @@ impl MemoryStorage {
 
         Ok(dp[n][m])
     }
+
+    /// Compares an `ip_addr`/`mac_addr` field value against a query value by parsing both into
+    /// their typed form and comparing by equality, sidestepping `matches()`'s word-splitting
+    /// entirely - splitting on `:` (a legitimate delimiter for other free-text fields) fragments a
+    /// MAC/IPv6 address into pieces that can never equal the unsplit query value, so an
+    /// exact-value match against these two fields could never succeed under the generic
+    /// word-based matcher. Typed comparison also correctly treats formatting differences (colon
+    /// vs hyphen MAC separators, mixed case hex, IPv6 zero-compression) as equal, which
+    /// `matches()` never attempted.
+    ///
+    /// Falls back to `matches()` (preserving existing wildcard-search support, e.g.
+    /// `mac_addr="bc:*"`) whenever the query value doesn't parse as that field's typed form - a
+    /// wildcard pattern never does, by construction.
+    fn address_matches(&self, field_name: &str, field_val: &str, query_val: &str) -> Result<bool, StorageError> {
+        if field_name == "ip_addr" {
+            if let Ok(query_ip) = query_val.parse::<std::net::IpAddr>() {
+                return Ok(field_val.parse::<std::net::IpAddr>() == Ok(query_ip));
+            }
+        } else if field_name == "mac_addr" {
+            if let Some(query_mac) = parse_mac_bytes(query_val) {
+                return Ok(parse_mac_bytes(field_val) == Some(query_mac));
+            }
+        }
+        self.matches(field_val, query_val)
+    }
+}
+
+/// Parses a MAC address string (colon- or hyphen-separated, e.g. "bc:24:11:00:02:04" or
+/// "BC-24-11-00-02-04") into its 6 raw bytes, or `None` if it isn't a valid MAC address.
+/// Case-insensitive and separator-insensitive by construction, since it operates on the parsed
+/// byte values rather than the original text - two different textual forms of the same address
+/// parse to identical bytes.
+fn parse_mac_bytes(s: &str) -> Option<[u8; 6]> {
+    let parts: Vec<&str> = s.split(|c| c == ':' || c == '-').collect();
+    if parts.len() != 6 {
+        return None;
+    }
+    let mut bytes = [0u8; 6];
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() || part.len() > 2 {
+            return None;
+        }
+        bytes[i] = u8::from_str_radix(part, 16).ok()?;
+    }
+    Some(bytes)
 }
 
 fn is_valid_mac_address(s: &str) -> bool {
-    let parts: Vec<&str> = s.split(|c| c == ':' || c == '-').collect();
-    if parts.len() != 6 {
-        return false;
-    }
-    for part in parts {
-        if part.is_empty() || part.len() > 2 {
-            return false;
-        }
-        if u8::from_str_radix(part, 16).is_err() {
-            return false;
-        }
-    }
-    true
+    parse_mac_bytes(s).is_some()
 }
 
 fn validate_ip_mac_field(key: &str, value: &str) -> Result<(), StorageError> {
@@ -277,7 +310,7 @@ impl MemoryStorage {
                         if let Some(list) = record.multi_fields.get(field_name) {
                             let mut match_found = false;
                             for item in list {
-                                if self.matches(item, value)? {
+                                if self.address_matches(field_name, item, value)? {
                                     match_found = true;
                                     break;
                                 }
@@ -1501,5 +1534,88 @@ mod tests {
         let records = storage.query(&[(Some("hostname".to_string()), "srv-first".to_string())], None).unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].fields.get("source").unwrap(), "web-console");
+    }
+
+    #[test]
+    fn test_should_match_exact_mac_address_query() {
+        // This is the exact bug: before the fix, this returned zero matches despite the record
+        // genuinely existing, because matches() splits "bc:24:11:00:02:04" into word fragments
+        // ("bc", "24", ...) that can never equal the unsplit query string.
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "test-host".to_string()),
+                ("mac_addr".to_string(), "bc:24:11:00:02:04".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        let records = storage.query(&[(Some("mac_addr".to_string()), "bc:24:11:00:02:04".to_string())], None).unwrap();
+        assert_eq!(records.len(), 1, "exact-value mac_addr query must match the record that has it");
+    }
+
+    #[test]
+    fn test_should_match_mac_address_query_regardless_of_case_and_separator() {
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "test-host-2".to_string()),
+                ("mac_addr".to_string(), "bc:24:11:00:02:04".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        // Different case AND different separator (hyphen) than how it was stored.
+        let records = storage.query(&[(Some("mac_addr".to_string()), "BC-24-11-00-02-04".to_string())], None).unwrap();
+        assert_eq!(records.len(), 1, "typed MAC comparison must be case- and separator-insensitive");
+    }
+
+    #[test]
+    fn test_should_still_support_fragment_mac_address_search_via_fallback() {
+        // Regression: a query value that isn't a full, parseable MAC address (here, just one
+        // octet) must still fall back to matches() exactly as it did before this fix - confirming
+        // address_matches() doesn't accidentally block the pre-existing fragment-search behavior.
+        //
+        // NOTE: this does not cover real wildcard syntax (e.g. mac_addr="bc:24:*") - that's a
+        // separate, still-open bug: matches()'s fallback path has the identical colon-splitting
+        // asymmetry for wildcard *patterns* containing colons (the pattern isn't colon-split, so
+        // it can never match a colon-stripped field fragment). Confirmed live: mac_addr="bc:24:*"
+        // against a stored "bc:24:11:00:02:04" matches 0 records. Out of scope for this fix -
+        // filed separately.
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "test-host-3".to_string()),
+                ("mac_addr".to_string(), "bc:24:11:00:02:04".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        let records = storage.query(&[(Some("mac_addr".to_string()), "bc".to_string())], None).unwrap();
+        assert_eq!(records.len(), 1, "fragment mac_addr search must still work via the matches() fallback");
+    }
+
+    #[test]
+    fn test_should_match_ipv6_address_query_regardless_of_compression() {
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "test-host-4".to_string()),
+                ("ip_addr".to_string(), "::1".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        // Fully-expanded form of the same address - must match via typed IpAddr comparison.
+        let records = storage.query(&[(Some("ip_addr".to_string()), "0:0:0:0:0:0:0:1".to_string())], None).unwrap();
+        assert_eq!(records.len(), 1, "typed IP comparison must treat IPv6 compression forms as equal");
     }
 }

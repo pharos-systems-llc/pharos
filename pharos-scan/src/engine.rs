@@ -195,10 +195,17 @@ pub fn read_arp_cache() -> std::collections::HashMap<IpAddr, String> {
 /// error) if there's no PTR record - this must never fail the overall scan. Wrapped in
 /// `spawn_blocking` because `dns_lookup::lookup_addr` is a blocking libc call.
 pub(crate) async fn lookup_hostname(ip: IpAddr) -> Option<String> {
-    tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip).ok())
-        .await
-        .ok()
-        .flatten()
+    match tokio::task::spawn_blocking(move || dns_lookup::lookup_addr(&ip)).await {
+        Ok(Ok(hostname)) => Some(hostname),
+        Ok(Err(e)) => {
+            debug!("Reverse DNS lookup failed for {}: {}", ip, e);
+            None
+        }
+        Err(e) => {
+            debug!("Reverse DNS lookup task failed for {}: {}", ip, e);
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -282,5 +289,14 @@ mod tests {
             Some(&"aa:bb:cc:dd:ee:ff".to_string())
         );
         assert_eq!(cache.get(&"192.168.1.2".parse::<IpAddr>().unwrap()), None);
+    }
+
+    #[tokio::test]
+    async fn test_should_return_none_without_panicking_for_unresolvable_ip() {
+        // 192.0.2.1 is TEST-NET-1 (RFC 5737) - reserved for documentation/testing, guaranteed to
+        // have no real reverse-DNS record anywhere.
+        let ip: IpAddr = "192.0.2.1".parse().unwrap();
+        let result = lookup_hostname(ip).await;
+        assert!(result.is_none());
     }
 }
