@@ -70,8 +70,23 @@ mdb -H hostname="srv-web-01"
 `mdb '*'` and `ph '*'` search across every record — but only if your shell passes the `*` through untouched. An **unquoted** `mdb *` gets expanded by your shell into every filename in your current directory before mdb ever sees it, silently turning your wildcard search into a query for hundreds of local filenames. Beyond just breaking the search, this sends those filenames to your Pharos server, where they're logged — a real information-disclosure risk if any of those names are sensitive. Always quote the wildcard: `mdb '*'`, not `mdb *`. Both clients print a stderr warning if a command looks like it was affected by this.
 :::
 
+A result with more than one matching record is prefixed with a match count and a blank line between each record's fields, so a multi-record result is easy to scan at a glance:
+```bash
+$ mdb '*' return hostname ip_addr
+2 matches:
+
+       hostname: srv-web-01
+        ip_addr: 10.0.0.5
+
+       hostname: srv-db-01
+        ip_addr: 10.0.0.6
+```
+A single-record result prints without the header or separator, exactly as it always has.
+
 ### Adding Records
 Adding records requires authorized write access. Pharos will automatically handle the SSH challenge-response if your key is enrolled.
+
+**First time, no key yet?** If `mdb`/`ph` can't find a signing key (default: `~/.ssh/id_ed25519`) and you're running interactively (not a script or CI job), the client offers to generate one on the spot and, once generated, offers to enroll its public half on a hub over SSH — reusing your existing SSH access instead of requiring you to shell in and copy files by hand. Decline either prompt and you'll get manual enrollment instructions printed instead. Running non-interactively? Neither prompt appears — enroll a key ahead of time, or see [Manual Authentication](#manual-authentication) below.
 
 ```bash
 # Add a new person
@@ -116,6 +131,15 @@ Pass `--debug` to either client to see exactly what's happening under the hood: 
 ```bash
 mdb --debug hostname="srv-web-01"
 ```
+
+### Manual Authentication
+For scripted or non-interactive authentication — producing credentials out of band to feed into another tool or workflow — sign a server-issued challenge string directly with your local key:
+
+```bash
+mdb auth sign "the-challenge-string-from-the-server"
+```
+
+This prints your public key and the resulting signature: everything needed to complete a manual `auth "<pubkey>" "<signature>"` handshake, without touching the network. Ordinary `query`/`add`/`change`/`delete` usage never needs this directly — `mdb`/`ph` already perform the same challenge-response automatically whenever a command requires authentication.
 
 ### Pipe-Friendly Output
 Pharos clients output clean, structured text that is easy to parse with standard Unix tools like `grep`, `awk`, or `jq`.

@@ -112,7 +112,7 @@ Pharos doesn't just store static data; it automatically discovers and maintains 
 ### Baseline vs. Delta Strategy
 To minimize network overhead and CPU impact, the Pulse agent employs a two-tier reporting strategy:
 
-1.  **Baseline (ONLINE)**: On startup, `pharos-pulse` collects a full hardware and OS metadata package (CPU Brand, Core count, Total RAM, Kernel version, Serial Number, and real network interface addresses via multi-valued `ip_addr` and `mac_addr` fields) and registers it with the server.
+1.  **Baseline (ONLINE)**: On startup, `pharos-pulse` collects a full hardware and OS metadata package — CPU brand and core count, total RAM (`mem_total_kb`), OS name/version and kernel version, hardware serial number and UUID, manufacturer and product name, and real network interface addresses via multi-valued `ip_addr` and `mac_addr` fields — and registers it with the server. (Serial number and UUID require a one-time permission grant on Linux hosts, applied automatically by the [Automated Installation Guide](./install); fields the host can't provide are simply omitted rather than sent as `unknown`.)
 2.  **Delta (HEARTBEAT)**: Every **60 minutes**, the agent sends a minimal presence signal to maintain the record's freshness and verify identity.
 
 ### Presence Lifecycle

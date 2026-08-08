@@ -79,6 +79,11 @@ Replace `[hub|node]` with the appropriate role for your machine:
     sudo systemctl restart pharos-pulse
     ```
 
+    **Prefer this automated instead of copying files by hand?** Append `--fetch-ca-ssh <user@host>` to the `node` install command itself — it pulls the hub's CA over SSH and configures pulse to trust it, *and* (if this run just generated a fresh signing key) enrolls that key's public half on the same hub over the same SSH connection, replacing everything in the box above plus the manual key-enrollment step that would otherwise follow it:
+    ```bash
+    curl -sSL https://raw.githubusercontent.com/iamrichardD/pharos/main/scripts/install.sh | bash -s -- node 192.168.1.5 --fetch-ca-ssh youruser@192.168.1.5
+    ```
+
   </div>
 
   <div slot="enterprise">
@@ -108,6 +113,18 @@ Replace `[hub|node]` with the appropriate role for your machine:
 
   </div>
 </TieredTabs>
+
+---
+
+## 🔍 Optional: Unattended Network Discovery
+
+Want Pharos to automatically discover devices that don't run `pharos-pulse` — switches, IoT gear, anything with no agent? Install `pharos-scan` with its own recurring `systemd` timer:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/iamrichardD/pharos/main/scripts/install.sh | bash -s -- scan-auto 192.168.1.5
+```
+
+This is a standalone, opt-in target — it doesn't come bundled with `hub` or any other role, so install it explicitly wherever you want the scanning to run. See [Network Scan](./network-scan#unattended-discovery) for what the resulting cycle actually does.
 
 ---
 

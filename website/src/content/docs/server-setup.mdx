@@ -208,12 +208,33 @@ This uses the same hot-reloadable keys directory already used for regular client
 
 ---
 
+## 🖥️ Live Terminal Dashboard
+
+For interactive debugging on a Home Lab box you're sitting in front of, run the server with `--tui` instead of letting it log to stdout:
+
+```bash
+pharos-server --tui
+```
+
+This swaps the normal log stream for a live terminal dashboard in the same window: current CPU/memory usage, total record count, and a scrolling event feed of every add/update as it happens, refreshed 4 times a second. Press `q` to quit — this also stops the server, since it shares the same shutdown path as `Ctrl+C`.
+
+It needs a real terminal to draw into and keyboard input to quit, so it's for foreground, interactive use — not something you'd run under `systemd` (no terminal to attach to, and normal `journalctl` logging is suppressed while it's active). Reach for it when you want to watch what's happening on a server in real time, e.g. confirming a `pharos-scan --auto` cycle or a bulk `mdb add` script is actually landing.
+
+---
+
 ## 📊 Monitoring & Observability
 
 Pharos exposes Prometheus metrics on port `9090` to track performance and inventory health.
 
 - **Endpoint:** `http://localhost:9090/metrics`
-- **Key Metrics:**
+- **Health Gauges:**
     - `pharos_cpu_usage_percentage`
     - `pharos_memory_usage_bytes`
     - `pharos_total_records`
+- **Write-Path Counters:** `pharos_records_added_total`, `pharos_records_updated_total`, and `pharos_records_deleted_total`, each labeled by `source` — which client actually performed the write (`mdb`, `ph`, `pharos-scan`, `pharos-pulse`, or `web-console`). Every record is stamped server-side with the `source` that created it (immutable once set, never client-supplied), which is what makes these counters attributable per-tool instead of just one global write counter.
+
+    These are standard Prometheus counters — always graph them with `rate()`/`increase()`, not the raw value, since they reset to zero on every server restart. A starting query for a per-source write-rate panel in Grafana:
+    ```promql
+    sum by (source) (rate(pharos_records_added_total[5m]))
+    ```
+    Worth alerting on: any nonzero rate where `source="unknown"`. Every write is supposed to come from a recognized Pharos client, so that label appearing at all means something is writing to your inventory that Pharos doesn't recognize as one of its own tools.

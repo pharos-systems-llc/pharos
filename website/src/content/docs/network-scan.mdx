@@ -86,6 +86,21 @@ Because `pharos-scan` outputs clean JSON to `stdout`, you can easily pipe the re
 ./pharos-scan --json | jq '.[] | select(.is_existing == false)'
 ```
 
+### Unattended Discovery
+For a fully hands-off cycle — no TUI, no JSON to pipe anywhere, just discover-and-sync — run:
+
+```bash
+pharos-scan --auto
+```
+
+This runs one full cycle (ping sweep across every locally detected subnet, ARP cache read, OUI/reverse-DNS resolve, then sync to your Pharos server) and exits — intended to be run on a schedule, not left running. Before writing, it checks whether a record for that device already exists and who owns it: if another source (e.g. `pharos-pulse`) already has a record for that device, `--auto` skips it entirely rather than overwriting a higher-fidelity field with a MAC-OUI guess.
+
+The [Automated Installation Guide](./install) can set this up as a recurring `systemd` timer (every 10 minutes) with its own dedicated, minimally-privileged signing key:
+```bash
+curl -sSL https://raw.githubusercontent.com/iamrichardD/pharos/main/scripts/install.sh | bash -s -- scan-auto 192.168.1.5
+```
+Unlike `hub`/`node`, this is opt-in and not bundled into either — install it explicitly on whichever host you want doing the periodic scanning.
+
 ---
 
 ## Next Steps

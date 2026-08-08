@@ -42,9 +42,39 @@ The Pharos ecosystem is designed to be highly configurable via environment varia
 | `PHAROS_WEBHOOK_FORMAT` | Payload format for `PHAROS_WEBHOOK_URL`: `generic` (default, custom-REST-API JSON), `slack` (Slack incoming-webhook compatible), or `discord` (Discord webhook compatible). | `generic` | Monitoring. |
 | `RUST_LOG` | Log verbosity (`error`/`warn`/`info`/`debug`/`trace`, optionally per-module e.g. `pharos_server=debug`). Standard Rust ecosystem convention, intentionally not `PHAROS_`-prefixed. A value that doesn't match any known module (including plain typos) silently disables all output with no warning — if logs go quiet after setting this, check for typos first. | `info` | Observability. |
 
+### Webhook Payload Examples
+
+**`PHAROS_ALERT_WEBHOOK_URL`** — Dead Man's Switch, fires once when a node goes stale:
+```json
+{
+  "event": "node_down",
+  "hostname": "srv-db-01",
+  "last_seen_at": "2026-08-08T04:12:00Z",
+  "elapsed_seconds": 7530
+}
+```
+
+**`PHAROS_WEBHOOK_URL`** with `PHAROS_WEBHOOK_FORMAT=generic` (the default) — fires on every add/change/delete:
+```json
+{
+  "event": "add",
+  "timestamp": "2026-08-08T04:12:00Z",
+  "fields": { "hostname": "srv-db-01", "ip_addr": "10.0.0.6" }
+}
+```
+
+**`PHAROS_WEBHOOK_FORMAT=slack`** or **`=discord`** send a single human-readable summary line instead of structured fields — a Slack incoming-webhook-compatible `{"text": "..."}`, or a Discord-compatible `{"content": "..."}`:
+```json
+{ "text": "Pharos: record added/updated (hostname=srv-db-01, ip_addr=10.0.0.6)" }
+```
+
+`PHAROS_ALERT_SCRIPT` is invoked directly (never through a shell) as `your-script.sh <hostname> <last_seen_at>` — write it to expect exactly those two positional arguments.
+
 ---
 
 ## 🛠️ CLI Client Configuration (`ph`, `mdb`)
+
+Both clients resolve the server address in this order: `PHAROS_SERVER` env var → `PHAROS_HOST`/`PHAROS_PORT` env vars → `/etc/pharos/client.conf` (a plain `PHAROS_SERVER=host:port` line, written automatically by the [Automated Installation Guide](./install)'s `node`/`pulse` targets so managed machines don't need the env var set by hand) → the built-in default (`127.0.0.1:2378`). Run either client with `--debug` to see which of these four sources it actually resolved against — see [CLI Clients](./cli-clients#debug-mode).
 
 | Variable | Description | Default | Impact |
 | :--- | :--- | :--- | :--- |
