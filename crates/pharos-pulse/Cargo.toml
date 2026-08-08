@@ -13,7 +13,7 @@
 
 [package]
 name = "pharos-pulse"
-version = "1.12.2"
+version = "1.12.3"
 edition = "2021"
 authors = ["Richard D. <https://github.com/iamrichardd>"]
 
