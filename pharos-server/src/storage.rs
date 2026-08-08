@@ -254,6 +254,23 @@ impl MemoryStorage {
                 return Ok(parse_mac_bytes(field_val) == Some(query_mac));
             }
         }
+
+        // Neither side parsed as its typed address (e.g. a wildcard pattern, or genuinely
+        // malformed input). A wildcard pattern that itself contains ":" - the same delimiter
+        // matches() splits the field value on - would otherwise be compared fragment-by-fragment
+        // against the split field value and could never match as a coherent whole (e.g.
+        // "bc:24:*" against split fragments "bc","24",... - no single fragment equals the whole
+        // pattern). When the query contains wildcard syntax, match the whole (unsplit) field
+        // value against the whole (unsplit) pattern directly instead, treating the address as one
+        // indivisible token rather than word-splitting it - this is exactly how a dotted IPv4
+        // wildcard like "192.168.*" already works today (dots were never a split delimiter, so an
+        // IPv4 value was always compared as one whole fragment). Plain, non-wildcard query values
+        // (e.g. "bc") keep using the existing fragment-based matches() fallback below, unchanged -
+        // that's a separately-decided, already-locked-in behavior this fix must not disturb.
+        if query_val.chars().any(|c| matches!(c, '*' | '?' | '+' | '[' | ']')) {
+            return self.wildcard_match(&field_val.to_lowercase(), &query_val.to_lowercase());
+        }
+
         self.matches(field_val, query_val)
     }
 }
@@ -1580,12 +1597,10 @@ mod tests {
         // octet) must still fall back to matches() exactly as it did before this fix - confirming
         // address_matches() doesn't accidentally block the pre-existing fragment-search behavior.
         //
-        // NOTE: this does not cover real wildcard syntax (e.g. mac_addr="bc:24:*") - that's a
-        // separate, still-open bug: matches()'s fallback path has the identical colon-splitting
-        // asymmetry for wildcard *patterns* containing colons (the pattern isn't colon-split, so
-        // it can never match a colon-stripped field fragment). Confirmed live: mac_addr="bc:24:*"
-        // against a stored "bc:24:11:00:02:04" matches 0 records. Out of scope for this fix -
-        // filed separately.
+        // NOTE: wildcard patterns containing colons (e.g. mac_addr="bc:24:*") are handled by a
+        // separate branch in address_matches() that matches the whole field value against the
+        // whole pattern directly, rather than this fragment-based fallback - see
+        // test_should_match_wildcard_mac_pattern_containing_colon below.
         let mut storage = MemoryStorage::new();
         storage.add_record(
             vec![
@@ -1617,5 +1632,84 @@ mod tests {
         // Fully-expanded form of the same address - must match via typed IpAddr comparison.
         let records = storage.query(&[(Some("ip_addr".to_string()), "0:0:0:0:0:0:0:1".to_string())], None).unwrap();
         assert_eq!(records.len(), 1, "typed IP comparison must treat IPv6 compression forms as equal");
+    }
+
+    #[test]
+    fn test_should_match_wildcard_mac_pattern_containing_colon() {
+        // The exact bug from Issue #207: before this fix, this query matched zero records despite
+        // the record genuinely existing, because the wildcard pattern "bc:24:*" was compared against
+        // colon-split field fragments ("bc", "24", ...) that can never satisfy the whole pattern.
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "wildcard-test-host".to_string()),
+                ("mac_addr".to_string(), "bc:24:11:00:02:04".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        let records = storage.query(&[(Some("mac_addr".to_string()), "bc:24:*".to_string())], None).unwrap();
+        assert_eq!(records.len(), 1, "wildcard mac_addr pattern containing a colon must match");
+    }
+
+    #[test]
+    fn test_should_not_match_wildcard_mac_pattern_with_wrong_prefix() {
+        // Negative case: confirms the fix does real prefix matching, not just "any wildcard query
+        // returns everything."
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "wildcard-negative-host".to_string()),
+                ("mac_addr".to_string(), "bc:24:11:00:02:04".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        let records = storage.query(&[(Some("mac_addr".to_string()), "ff:24:*".to_string())], None).unwrap();
+        assert_eq!(records.len(), 0, "wildcard mac_addr pattern with a non-matching prefix must not match");
+    }
+
+    #[test]
+    fn test_should_match_wildcard_mac_pattern_without_colon() {
+        // Regression: a wildcard pattern with no colon (e.g. "bc*") already worked correctly
+        // before the #207 fix, via the old fragment-based matches() fallback (wildcard_match("bc",
+        // "bc*") against the split fragment "bc"). This must keep working now that it takes the
+        // new whole-string branch instead (wildcard_match against the full unsplit field value) -
+        // confirms that branch didn't only fix colon-containing patterns while accidentally
+        // breaking the simpler colon-free wildcard case.
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "wildcard-no-colon-host".to_string()),
+                ("mac_addr".to_string(), "bc:24:11:00:02:04".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        let records = storage.query(&[(Some("mac_addr".to_string()), "bc*".to_string())], None).unwrap();
+        assert_eq!(records.len(), 1, "wildcard mac_addr pattern without a colon must still match");
+    }
+
+    #[test]
+    fn test_should_match_wildcard_ipv6_pattern_containing_colon() {
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "wildcard-ipv6-host".to_string()),
+                ("ip_addr".to_string(), "2001:db8:85a3:0:0:0:0:1".to_string()),
+            ],
+            None,
+            None,
+        ).unwrap();
+
+        let records = storage.query(&[(Some("ip_addr".to_string()), "2001:db8:*".to_string())], None).unwrap();
+        assert_eq!(records.len(), 1, "wildcard ip_addr pattern containing a colon must match an IPv6 value");
     }
 }
