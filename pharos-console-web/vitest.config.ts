@@ -14,6 +14,12 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Vitest does not read astro.config.mjs's Vite settings - the __ALLOW_SKIP_AUTH__ define needs
+  // to be repeated here too, or importing src/middleware.ts under test would throw a
+  // ReferenceError. Defaults to false here as well, same as a normal build.
+  define: {
+    __ALLOW_SKIP_AUTH__: JSON.stringify(process.env.ALLOW_SKIP_AUTH === 'true'),
+  },
   test: {
     environment: 'happy-dom',
     globals: true,

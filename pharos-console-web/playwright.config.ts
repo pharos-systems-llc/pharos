@@ -30,6 +30,10 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+  // NOTE: running E2E locally requires building the console with the E2E-only bypass compiled
+  // in first - the plain `npm run build` used for real deployments does NOT include it:
+  //   ALLOW_SKIP_AUTH=true npm run build && npm run test:e2e
+  // See src/middleware.ts and astro.config.mjs for why.
   webServer: [
     {
       command: 'PHAROS_SANDBOX=true PHAROS_SERVER_URL=https://127.0.0.1:2378 PHAROS_HOST=127.0.0.1 PHAROS_PORT=2378 HOST=0.0.0.0 PORT=3000 node test-server.mjs',

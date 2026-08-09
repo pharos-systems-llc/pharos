@@ -103,8 +103,9 @@ Both clients resolve the server address in this order: `PHAROS_SERVER` env var â
 | :--- | :--- | :--- | :--- |
 | `PHAROS_HOST` | Hostname or IP of the backend Pharos server. | `127.0.0.1` | Backend connectivity. |
 | `PHAROS_CA_CERT` | Path to CA certificate for trusting the backend's TLS. | Unset | Security. |
-| `PHAROS_SANDBOX` | Enable Sandbox-specific UI hints. | `false` | UX/UI. |
+| `PHAROS_SANDBOX` | Forces the console's backend connection to use TLS, and enables Sandbox-specific UI hints. **Requires `PHAROS_CA_CERT` to also be set** - the console refuses to start a TLS connection otherwise, rather than silently disabling certificate verification. | `false` | Security, UX/UI. |
 | `PHAROS_TLS_CERT` | Path to SSL/TLS certificate for Web. | Unset | Security (HTTPS). |
 | `PHAROS_TLS_KEY` | Path to SSL/TLS private key for Web. | Unset | Security (HTTPS). |
 | `PHAROS_PRIVATE_KEY` | Private key for signing auth challenges. | Unset | Authorization. |
 | `PHAROS_PUBLIC_KEY` | Public key associated with the private key. | Unset | Authorization. |
+| `PHAROS_SKIP_AUTH` | **Testing only - never set in a real deployment.** Bypasses login entirely, granting a synthesized admin session to any request. Only takes effect in a build explicitly compiled with `ALLOW_SKIP_AUTH=true npm run build` (see `pharos-console-web/src/middleware.ts`) - the real published image (what `install.sh hub` and the Sandbox deployment both use) does not include this bypass at all, regardless of this variable's runtime value. | Unset | Security (testing only). |

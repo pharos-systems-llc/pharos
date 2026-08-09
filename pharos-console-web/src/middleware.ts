@@ -26,8 +26,16 @@ export const onRequest = defineMiddleware(async (context, next) => {
     const sessionCookie = cookies.get(AUTH_COOKIE_NAME)?.value;
     let session = await getSession(sessionCookie);
     
-    // Support PHAROS_SKIP_AUTH for E2E testing / Sandbox dev
-    if (!session && process.env.PHAROS_SKIP_AUTH === 'true') {
+    // Support PHAROS_SKIP_AUTH for E2E testing only - gated behind the __ALLOW_SKIP_AUTH__
+    // build-time constant (see astro.config.mjs), which is only true when a build was explicitly
+    // run with ALLOW_SKIP_AUTH=true. Any normal build - including the real image published to
+    // GHCR that both production hub installs and the real Sandbox deployment pull - has this
+    // constant baked in as false, so this bypass is unreachable there regardless of what runtime
+    // env vars a misconfigured deployment might have set. The `typeof` check is defensive in case
+    // some other tooling path doesn't define the constant at all - it must default to "no bypass",
+    // never "no bypass" being an error that somehow allows the bypass instead.
+    const allowSkipAuth = typeof __ALLOW_SKIP_AUTH__ !== 'undefined' && __ALLOW_SKIP_AUTH__;
+    if (allowSkipAuth && !session && process.env.PHAROS_SKIP_AUTH === 'true') {
         session = { userId: 'admin', roles: ['admin'], sub: 'admin' };
     }
 

@@ -31,6 +31,15 @@ export default defineConfig({
   },
 
   vite: {
-    plugins: [tailwindcss()]
+    plugins: [tailwindcss()],
+    // __ALLOW_SKIP_AUTH__ is a build-time constant, not a runtime env var - it's `false` in any
+    // normal build (including the Containerfile's plain `npm run build`, which is what the real
+    // published image and both production/Sandbox deployments run), so the PHAROS_SKIP_AUTH
+    // bypass in src/middleware.ts is provably unreachable in that build. Set it only when
+    // explicitly building a throwaway artifact for local E2E testing:
+    // `ALLOW_SKIP_AUTH=true npm run build`.
+    define: {
+      __ALLOW_SKIP_AUTH__: JSON.stringify(process.env.ALLOW_SKIP_AUTH === 'true'),
+    },
   }
 });

@@ -101,6 +101,32 @@
     return Buffer.concat([header, seed]);
  }
 
+ /**
+  * Opens a connection to the Pharos backend, resolving TLS vs. plaintext the same way for both
+  * query and auth-check paths (previously duplicated separately in each).
+  *
+  * PHAROS_SANDBOX=true is a real deployment mode (see deploy/sandbox.yml, the "Lab in a Box" demo
+  * environment) that forces this connection to use TLS - but it must never be used to silently
+  * skip certificate verification. The real Sandbox deployment always sets PHAROS_CA_CERT alongside
+  * PHAROS_SANDBOX=true, so requiring it here (failing loudly if missing) costs that deployment
+  * nothing - it only closes a latent gap for anyone who sets PHAROS_SANDBOX alone.
+  */
+ export function connectToPharos(port: number, host: string): net.Socket {
+    const useTls = !!process.env.PHAROS_CA_CERT || !!process.env.PHAROS_TLS_CERT || process.env.PHAROS_SANDBOX === 'true';
+    if (!useTls) {
+        return net.connect(port, host);
+    }
+    if (process.env.PHAROS_SANDBOX === 'true' && !process.env.PHAROS_CA_CERT) {
+        throw new Error(
+            'PHAROS_SANDBOX=true requires PHAROS_CA_CERT to be set too - refusing to start a TLS connection with certificate verification disabled.'
+        );
+    }
+    return tls.connect(port, host, {
+        ca: process.env.PHAROS_CA_CERT ? fs.readFileSync(process.env.PHAROS_CA_CERT) : undefined,
+        rejectUnauthorized: !!process.env.PHAROS_CA_CERT
+    });
+ }
+
  export async function executePharosQuery(clientId: string, queryStr: string, host?: string, port?: number): Promise<PharosResponse> {
     const hostEnv = host || process.env.PHAROS_HOST || '127.0.0.1';
     
@@ -112,18 +138,8 @@
     const portEnv = portRaw;
     
     return new Promise((resolve, reject) => {
-        const useTls = !!process.env.PHAROS_CA_CERT || !!process.env.PHAROS_TLS_CERT || process.env.PHAROS_SANDBOX === 'true';
+        const client = connectToPharos(portEnv, hostEnv);
 
-        let client: net.Socket;
-        if (useTls) {
-            client = tls.connect(portEnv, hostEnv, {
-                ca: process.env.PHAROS_CA_CERT ? fs.readFileSync(process.env.PHAROS_CA_CERT) : undefined,
-                rejectUnauthorized: !!process.env.PHAROS_CA_CERT
-            });
-        } else {
-            client = net.connect(portEnv, hostEnv);
-        }
-        
         let buffer = '';
         let stage = 'banner';
         
@@ -339,18 +355,9 @@ export async function executeAuthCheck(publicKey: string, signature: string, cha
    }
    const port = portRaw;
 
-   const useTls = !!process.env.PHAROS_CA_CERT || !!process.env.PHAROS_TLS_CERT || process.env.PHAROS_SANDBOX === 'true';
     return new Promise((resolve, reject) => {
-        let client: net.Socket;
-        if (useTls) {
-            client = tls.connect(port, host, {
-                ca: process.env.PHAROS_CA_CERT ? fs.readFileSync(process.env.PHAROS_CA_CERT) : undefined,
-                rejectUnauthorized: !!process.env.PHAROS_CA_CERT
-            });
-        } else {
-            client = net.connect(port, host);
-        }
-        
+        const client = connectToPharos(port, host);
+
         let buffer = '';
         let stage = 'banner';
 
