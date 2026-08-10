@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use serde::{Serialize, Deserialize};
-use tracing::{instrument, info, error, debug};
+use tracing::{instrument, info, warn, error, debug};
 use chrono::Utc;
 use tokio::sync::mpsc;
 
@@ -88,7 +88,7 @@ pub trait Storage: Send + Sync {
     fn add_record(&mut self, fields: Vec<(String, String)>, fingerprint: Option<String>, team: Option<String>) -> Result<(), StorageError>;
     fn query(&self, selections: &[(Option<String>, String)], default_type: Option<RecordType>) -> Result<Vec<Record>, StorageError>;
     fn upsert_record(&mut self, fields: Vec<(String, String)>, fingerprint: Option<String>, team: Option<String>) -> Result<UpsertOutcome, StorageError>;
-    fn delete_record(&mut self, selections: &[(Option<String>, String)], fingerprint: Option<String>, teams: &[String]) -> Result<usize, StorageError>;
+    fn delete_record(&mut self, selections: &[(Option<String>, String)], fingerprint: Option<String>, teams: &[String], roles: &[String]) -> Result<usize, StorageError>;
     /// Purpose (The "Why"): Modifies matching and authorized records' fields in-place.
     /// This matches selections, authorizes modifications using fingerprint/team checks,
     /// and applies field modifications.
@@ -519,21 +519,36 @@ impl Storage for MemoryStorage {
         self.add_record(fields, fingerprint, team).map(|_| UpsertOutcome::Created)
     }
 
+    /// Purpose (The "Why"): Deletes matching, authorized records. A caller with the `admin` role
+    /// (already treated as a root-equivalent credential elsewhere in this codebase - see
+    /// `auth.rs`'s `auto_generate_admin_key`) can force-delete a record it doesn't otherwise own,
+    /// as a last-resort recovery path for when a record's owning key has been lost or rotated and
+    /// no other authorized key can reach it (Issue #210). This is deliberately delete-only, not a
+    /// general ownership-reassignment mechanism - the caller is expected to re-add the record
+    /// afterward with correct new ownership if it's still needed.
     #[instrument(skip(self))]
-    fn delete_record(&mut self, selections: &[(Option<String>, String)], fingerprint: Option<String>, teams: &[String]) -> Result<usize, StorageError> {
+    fn delete_record(&mut self, selections: &[(Option<String>, String)], fingerprint: Option<String>, teams: &[String], roles: &[String]) -> Result<usize, StorageError> {
         let mut to_delete_ids = Vec::new();
+        let is_admin = roles.contains(&"admin".to_string());
 
         for record in &self.records {
             if self.record_matches_selections(record, selections)? {
                 // Check authorization for deletion
-                let authorized = match (&record.owner_fingerprint, &record.owner_team) {
+                let owner_matched = match (&record.owner_fingerprint, &record.owner_team) {
                     (Some(fp), _) if fingerprint.as_ref() == Some(fp) => true,
                     (_, Some(team)) if teams.contains(team) => true,
                     (None, None) => true, // System records?
                     _ => false,
                 };
 
-                if authorized {
+                if owner_matched {
+                    to_delete_ids.push(record.id);
+                } else if is_admin {
+                    warn!(
+                        record_id = record.id,
+                        fingerprint = ?fingerprint,
+                        "Admin-role override: force-deleting record not owned by the requesting key (Issue #210 recovery path)"
+                    );
                     to_delete_ids.push(record.id);
                 } else {
                     return Err(StorageError::Unauthorized);
@@ -766,8 +781,8 @@ impl Storage for FileStorage {
         Ok(outcome)
     }
 
-    fn delete_record(&mut self, selections: &[(Option<String>, String)], fingerprint: Option<String>, teams: &[String]) -> Result<usize, StorageError> {
-        let count = self.memory.delete_record(selections, fingerprint, teams)?;
+    fn delete_record(&mut self, selections: &[(Option<String>, String)], fingerprint: Option<String>, teams: &[String], roles: &[String]) -> Result<usize, StorageError> {
+        let count = self.memory.delete_record(selections, fingerprint, teams, roles)?;
         if count > 0 {
             self.queue_persistence();
         }
@@ -941,7 +956,7 @@ impl Storage for LdapStorage {
     }
 
     #[instrument(skip(self))]
-    fn delete_record(&mut self, _selections: &[(Option<String>, String)], _fingerprint: Option<String>, _teams: &[String]) -> Result<usize, StorageError> {
+    fn delete_record(&mut self, _selections: &[(Option<String>, String)], _fingerprint: Option<String>, _teams: &[String], _roles: &[String]) -> Result<usize, StorageError> {
         error!("LDAP storage is currently read-only");
         Err(StorageError::ReadOnly)
     }
@@ -1711,5 +1726,71 @@ mod tests {
 
         let records = storage.query(&[(Some("ip_addr".to_string()), "2001:db8:*".to_string())], None).unwrap();
         assert_eq!(records.len(), 1, "wildcard ip_addr pattern containing a colon must match an IPv6 value");
+    }
+
+    #[test]
+    fn test_should_allow_admin_role_to_force_delete_record_owned_by_different_fingerprint() {
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "orphaned-host".to_string()),
+            ],
+            Some("original-owner-fingerprint".to_string()),
+            None,
+        ).unwrap();
+
+        // A different fingerprint, but with the admin role, must still be able to delete it.
+        let result = storage.delete_record(
+            &[(Some("hostname".to_string()), "orphaned-host".to_string())],
+            Some("different-fingerprint".to_string()),
+            &[],
+            &["admin".to_string()],
+        );
+        assert!(matches!(result, Ok(1)), "admin role must be able to force-delete a record it doesn't own");
+    }
+
+    #[test]
+    fn test_should_still_reject_delete_from_non_admin_non_owner() {
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "owned-host".to_string()),
+            ],
+            Some("original-owner-fingerprint".to_string()),
+            None,
+        ).unwrap();
+
+        // Different fingerprint, no admin role - must still be rejected exactly as before this fix.
+        let result = storage.delete_record(
+            &[(Some("hostname".to_string()), "owned-host".to_string())],
+            Some("different-fingerprint".to_string()),
+            &[],
+            &[],
+        );
+        assert!(matches!(result, Err(StorageError::Unauthorized)), "non-admin, non-owner delete must still be rejected");
+    }
+
+    #[test]
+    fn test_should_allow_owner_to_delete_own_record_without_admin_role() {
+        let mut storage = MemoryStorage::new();
+        storage.add_record(
+            vec![
+                ("type".to_string(), "machine".to_string()),
+                ("hostname".to_string(), "self-owned-host".to_string()),
+            ],
+            Some("owner-fingerprint".to_string()),
+            None,
+        ).unwrap();
+
+        // The actual owner, no admin role needed - the common case, must be completely unaffected.
+        let result = storage.delete_record(
+            &[(Some("hostname".to_string()), "self-owned-host".to_string())],
+            Some("owner-fingerprint".to_string()),
+            &[],
+            &[],
+        );
+        assert!(matches!(result, Ok(1)), "the record's actual owner must still be able to delete it without needing the admin role");
     }
 }

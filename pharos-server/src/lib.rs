@@ -501,11 +501,11 @@ where S: AsyncRead + AsyncWrite + Unpin + Send + 'static
                             let mut lock = storage.write().map_err(|_| anyhow::anyhow!("Storage lock poisoned"))?;
                             if context.options.limit.is_none() {
                                 // No session limit configured - skip the extra pre-flight scan.
-                                lock.delete_record(selections, context.fingerprint.clone(), &context.teams)
+                                lock.delete_record(selections, context.fingerprint.clone(), &context.teams, &context.roles)
                             } else {
                                 match lock.query(selections, None) {
                                     Ok(matched) => match check_delete_limit(&matched, &context.options) {
-                                        Ok(()) => lock.delete_record(selections, context.fingerprint.clone(), &context.teams),
+                                        Ok(()) => lock.delete_record(selections, context.fingerprint.clone(), &context.teams, &context.roles),
                                         Err(e) => Err(e),
                                     },
                                     Err(e) => Err(e),
