@@ -3,7 +3,7 @@
 <p align="center">
 <!-- BADGES_START -->
   <a href="docs/DORA.md"><img src="https://img.shields.io/badge/DORA:__Deployment-High%20(weekly)-blue" alt="DORA: Deployment" /></a>
-  <a href="docs/DORA.md"><img src="https://img.shields.io/badge/DORA:__Failure-14.0%25-yellow" alt="DORA: Failure" /></a>
+  <a href="docs/DORA.md"><img src="https://img.shields.io/badge/DORA:__Failure-22.0%25-yellow" alt="DORA: Failure" /></a>
 <!-- BADGES_END -->
   <a href="artifacts/rfc2378.md"><img src="https://img.shields.io/badge/Protocol-RFC_2378-orange" alt="Protocol: RFC 2378" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Made%20with-Rust-black?logo=rust" alt="Made with Rust" /></a>
@@ -94,7 +94,7 @@ If you see an error related to `seccomp` and `bdflush` (common on Ubuntu 24.04 w
 | Metric | Status | Category |
 | :--- | :--- | :--- |
 | **Deployment Frequency** | 13 tags | High (weekly) |
-| **Change Failure Rate** | 14.0% | Elite |
+| **Change Failure Rate** | 22.0% | Elite |
 
 > [View Full DORA Report](docs/DORA.md)
 <!-- DORA_END -->
