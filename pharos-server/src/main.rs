@@ -27,25 +27,20 @@ use std::time::Duration;
 use std::path::PathBuf;
 use std::env;
 use std::path::Path;
-use tokio_rustls::rustls::{ServerConfig, pki_types::CertificateDer, pki_types::PrivateKeyDer};
+use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
-use std::fs::File;
-use std::io::BufReader;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 
 fn load_certs(path: &Path) -> anyhow::Result<Vec<CertificateDer<'static>>> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let certs = rustls_pemfile::certs(&mut reader)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(certs)
+    CertificateDer::pem_file_iter(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read certs from {:?}: {}", path, e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("Failed to parse a certificate in {:?}: {}", path, e))
 }
 
 fn load_key(path: &Path) -> anyhow::Result<PrivateKeyDer<'static>> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let key = rustls_pemfile::private_key(&mut reader)?
-        .ok_or_else(|| anyhow::anyhow!("No private key found in {:?}", path))?;
-    Ok(key)
+    PrivateKeyDer::from_pem_file(path)
+        .map_err(|e| anyhow::anyhow!("No private key found in {:?}: {}", path, e))
 }
 
 fn build_tls_acceptor(cert_path: &Path, key_path: &Path) -> anyhow::Result<TlsAcceptor> {

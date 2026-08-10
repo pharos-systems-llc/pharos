@@ -22,7 +22,8 @@ use std::fs;
 use std::env;
 use anyhow::{Result, Context, anyhow};
 use std::sync::Arc;
-use tokio_rustls::rustls::{ClientConfig, RootCertStore, pki_types::ServerName};
+use tokio_rustls::rustls::{ClientConfig, RootCertStore, pki_types::ServerName, pki_types::CertificateDer};
+use rustls_pki_types::pem::PemObject;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
@@ -139,11 +140,11 @@ impl PharosClient {
                 return Err(anyhow!("Timeout waiting for CA cert at {:?}", ca_path));
             }
 
-            let file = fs::File::open(ca_path)
-                .with_context(|| format!("Failed to open CA cert at {:?}", ca_path))?;
-            let mut reader = std::io::BufReader::new(file);
-            for cert in rustls_pemfile::certs(&mut reader) {
-                root_store.add(cert?)?;
+            for cert in CertificateDer::pem_file_iter(ca_path)
+                .with_context(|| format!("Failed to read CA cert at {:?}", ca_path))?
+            {
+                let cert = cert.with_context(|| format!("Failed to parse a certificate in {:?}", ca_path))?;
+                root_store.add(cert)?;
             }
         }
 

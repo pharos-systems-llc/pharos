@@ -66,7 +66,7 @@ fn handle_provision_key(params: Option<Value>) -> Result<Value, RpcError> {
     let keys_path = Path::new(&keys_dir);
     
     if !keys_path.exists() {
-        fs::create_dir_all(&keys_path)
+        fs::create_dir_all(keys_path)
             .map_err(|e| RpcError { code: -32603, message: format!("Failed to create keys directory: {}", e) })?;
     }
 

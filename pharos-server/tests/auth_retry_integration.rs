@@ -20,29 +20,24 @@ use pharos_server::middleware::{MiddlewareChain, RbacMiddleware, SecurityTierMid
 use pharos_client::{PharosClient, PharosResponse};
 
 use tokio::net::TcpListener;
-use tokio_rustls::rustls::{ServerConfig, pki_types::CertificateDer, pki_types::PrivateKeyDer};
+use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::sync::{Arc, RwLock};
 use std::path::Path;
-use std::fs::File;
-use std::io::BufReader;
 use std::process::Command;
 use tempfile::tempdir;
 
 fn load_certs(path: &Path) -> Result<Vec<CertificateDer<'static>>, std::io::Error> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let certs = rustls_pemfile::certs(&mut reader)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(certs)
+    CertificateDer::pem_file_iter(path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 fn load_key(path: &Path) -> Result<PrivateKeyDer<'static>, std::io::Error> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let key = rustls_pemfile::private_key(&mut reader)?
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No private key found"))?;
-    Ok(key)
+    PrivateKeyDer::from_pem_file(path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 #[tokio::test]
