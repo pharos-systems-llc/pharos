@@ -12,7 +12,7 @@
 
 [package]
 name = "ph"
-version = "1.12.4"
+version = "1.12.5"
 edition = "2024"
 
 [dependencies]
