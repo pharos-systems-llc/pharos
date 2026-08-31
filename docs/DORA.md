@@ -1,12 +1,12 @@
 # DORA Metrics Report
 
-**Generated at:** 2026-08-24T01:01:57Z (Last 30 Days)
+**Generated at:** 2026-08-31T03:19:13Z (Last 30 Days)
 
 | Metric | Current Value | Performance Category |
 | :--- | :--- | :--- |
-| **Deployment Frequency** | 13 tags | High (weekly) |
+| **Deployment Frequency** | 39 tags | Elite (>1/day) |
 | **Lead Time for Changes** | 0.1h | High |
-| **Change Failure Rate** | 23.0% | Elite |
+| **Change Failure Rate** | 26.0% | Elite |
 | **Time to Restore Service** | 4.4h | Elite |
 
 ## Definitions
