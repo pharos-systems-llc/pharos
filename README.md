@@ -2,7 +2,7 @@
 
 <p align="center">
 <!-- BADGES_START -->
-  <a href="docs/DORA.md"><img src="https://img.shields.io/badge/DORA:__Deployment-Elite%20(>1/day)-brightgreen" alt="DORA: Deployment" /></a>
+  <a href="docs/DORA.md"><img src="https://img.shields.io/badge/DORA:__Deployment-Medium%20(monthly)-yellow" alt="DORA: Deployment" /></a>
   <a href="docs/DORA.md"><img src="https://img.shields.io/badge/DORA:__Failure-0.0%25-brightgreen" alt="DORA: Failure" /></a>
 <!-- BADGES_END -->
   <a href="artifacts/rfc2378.md"><img src="https://img.shields.io/badge/Protocol-RFC_2378-orange" alt="Protocol: RFC 2378" /></a>
@@ -93,7 +93,7 @@ If you see an error related to `seccomp` and `bdflush` (common on Ubuntu 24.04 w
 ### 🚀 Project Velocity (DORA)
 | Metric | Status | Category |
 | :--- | :--- | :--- |
-| **Deployment Frequency** | 39 tags | Elite (>1/day) |
+| **Deployment Frequency** | 0 tags | Medium (monthly) |
 | **Change Failure Rate** | 0.0% | Elite |
 
 > [View Full DORA Report](docs/DORA.md)
